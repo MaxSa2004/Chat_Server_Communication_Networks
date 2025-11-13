@@ -4,12 +4,19 @@ import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Queue;
 import java.util.Set;
 
 public class ChatServer {
   private static final int BUFFER_SIZE = 16 * 1024;
+  // key : nickname, value: connection (easier to find out if the nickname already exists)
+  private static final HashMap<String, Connection> nicknameMap = new HashMap<>();
+  // ERROR msg
+  private static final String errorMsg = "ERROR\n";
+  // OK msg
+  private static final String okMsg = "OK\n";
 
   // Per-connection state
   private static class Connection {
@@ -53,7 +60,8 @@ public class ChatServer {
           if (key.isAcceptable()) {
             ServerSocketChannel ssc = (ServerSocketChannel) key.channel();
             SocketChannel sc = ssc.accept(); // non-blocking accept()
-            if (sc == null) continue;
+            if (sc == null)
+              continue;
             sc.configureBlocking(false);
             Connection conn = new Connection();
             sc.register(selector, SelectionKey.OP_READ, conn);
@@ -67,7 +75,10 @@ public class ChatServer {
             if (!alive) {
               // client closed
               key.cancel();
-              try { sc.close(); } catch (IOException ignore) {}
+              try {
+                sc.close();
+              } catch (IOException ignore) {
+              }
               System.out.println(conn.nick + " has left the chat.");
             }
           }
@@ -83,8 +94,10 @@ public class ChatServer {
           // error on this channel; cancel and close
           try {
             key.cancel();
-            if (key.channel() != null) key.channel().close();
-          } catch (IOException ignore) {}
+            if (key.channel() != null)
+              key.channel().close();
+          } catch (IOException ignore) {
+          }
           System.err.println("IO error: " + ioe.getMessage());
         }
       }
@@ -96,8 +109,8 @@ public class ChatServer {
     ByteBuffer in = conn.in;
     int bytesRead = sc.read(in);
     if (bytesRead == -1) {
-        String leaveMsg = conn.nick + " left the chat.\n";
-        broadcast(leaveMsg, key);
+      String leaveMsg = conn.nick + " left the chat.\n";
+      broadcast(leaveMsg, key);
       return false; // client closed
     }
     if (bytesRead == 0) {
@@ -119,18 +132,25 @@ public class ChatServer {
     while (true) {
       int idx = -1;
       for (int i = 0; i < conn.recv.length(); i++) {
-        if (conn.recv.charAt(i) == '\n') { idx = i; break; }
+        if (conn.recv.charAt(i) == '\n') {
+          idx = i;
+          break;
+        }
       }
-      if (idx == -1) break; // no full line yet
+      if (idx == -1)
+        break; // no full line yet
 
       // Extract the line without the trailing newline and optional '\r'
       String line = conn.recv.substring(0, idx);
-      if (line.endsWith("\r")) line = line.substring(0, line.length() - 1);
+      // check if it's empty
+      if(line.isEmpty()) return true;
+      if (line.endsWith("\r"))
+        line = line.substring(0, line.length() - 1);
 
       // Remove the processed line from the buffer
       conn.recv.delete(0, idx + 1);
 
-      if (conn.nick == null) {
+      if (conn.nick == null) { // if the user doesn't have a nickname yet
         // First line is the nickname
         conn.nick = line.trim();
         System.out.println("Set nickname for " + sc.getRemoteAddress() + " -> " + conn.nick);
@@ -138,10 +158,45 @@ public class ChatServer {
         String joinMsg = conn.nick + " joined the chat.\n";
         broadcast(joinMsg, key);
       } else {
-        // Regular message: broadcast "nick: message"
-        String msg = conn.nick + ": " + line + "\n";
-        System.out.println("Broadcasting: " + msg.trim());
-        broadcast(msg, key);
+        // does the line start with '/'?
+        if (line.startsWith("/")) {
+          if(line.length() > 1 && line.charAt(1)=='/'){
+            // it's just a message that starts with //
+            String escapedMessage = line.substring(1);
+            // Regular message: broadcast "nick: message"
+          String msg = conn.nick + ": " + escapedMessage + "\n";
+          System.out.println("Broadcasting: " + msg.trim());
+          broadcast(msg, key);
+          } else {
+            String[] parts = line.split(" ");
+            String cmd = parts[0];
+            switch (cmd) {
+                case "nick":
+                    // used to pick a nickname or to change a nickname (the nickname can't already be chosen by another user!)
+                    String new_nickname = parts[1];
+                    // check if nickname already exists
+                    if(nicknameMap.containsKey(new_nickname)){
+                      System.out.println(errorMsg);
+                    }else {
+                      if(conn.nick!=null){ // if it's a nickname change instead of user creation
+                        nicknameMap.remove(conn.nick);
+                      }
+                      conn.nick = new_nickname;
+                      nicknameMap.put((new_nickname), conn);
+                      System.out.println(okMsg);
+                    }
+                    break;
+                default:
+                    throw new AssertionError();
+            }
+          }
+        } else {
+          // Regular message: broadcast "nick: message"
+          String msg = conn.nick + ": " + line + "\n";
+          System.out.println("Broadcasting: " + msg.trim());
+          broadcast(msg, key);
+        }
+
       }
     }
 
@@ -149,15 +204,19 @@ public class ChatServer {
   }
 
   // Broadcast message (UTF-8 string) to all connected clients.
-  // The 'originKey' parameter is the SelectionKey of the sender (may be used to exclude sender if desired).
+  // The 'originKey' parameter is the SelectionKey of the sender (may be used to
+  // exclude sender if desired).
   private static void broadcast(String message, SelectionKey originKey) {
     byte[] payload = message.getBytes(StandardCharsets.UTF_8);
     Selector sel = originKey.selector();
     for (SelectionKey k : sel.keys()) {
-      if (!k.isValid()) continue;
-      if (!(k.channel() instanceof SocketChannel)) continue;
+      if (!k.isValid())
+        continue;
+      if (!(k.channel() instanceof SocketChannel))
+        continue;
       Connection other = (Connection) k.attachment();
-      if (other == null) continue; // skip server socket
+      if (other == null)
+        continue; // skip server socket
       // Enqueue a new ByteBuffer for this client
       ByteBuffer outBuf = ByteBuffer.wrap(payload);
       other.outQueue.add(outBuf);
@@ -166,7 +225,12 @@ public class ChatServer {
         handleWrite((SocketChannel) k.channel(), other, k);
       } catch (IOException e) {
         // On write error, cancel and close the key/channel
-        try { k.cancel(); if (k.channel() != null) k.channel().close(); } catch (IOException ignore) {}
+        try {
+          k.cancel();
+          if (k.channel() != null)
+            k.channel().close();
+        } catch (IOException ignore) {
+        }
       }
     }
   }
