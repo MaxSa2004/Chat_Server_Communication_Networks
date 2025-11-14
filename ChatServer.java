@@ -115,8 +115,9 @@ public class ChatServer {
                 broadcast(LeftMsg, conn.room, key);
               }
               if (conn.nick != null)
-                nicknameMap.remove(conn.nick);
+                {nicknameMap.remove(conn.nick);}
               conn.nick = null;
+              conn.room = null;
               key.cancel();
               sc.close();
             } else {
@@ -157,8 +158,9 @@ public class ChatServer {
         }
         default -> {
           if (conn.nick != null)
-            nicknameMap.remove(conn.nick);
+            {nicknameMap.remove(conn.nick);}
           conn.nick = null;
+          conn.room = null;
           return false;
         }
       }
