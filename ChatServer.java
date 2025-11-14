@@ -43,12 +43,10 @@ public class ChatServer {
     final int port;
     if (args.length == 0) {
       port = 8000;
-      System.out.println("No port given, using default: " + port);
     } else {
       try {
         port = Integer.parseInt(args[0]);
       } catch (NumberFormatException e) {
-        System.err.println("Invalid port: " + args[0]);
         return;
       }
     }
@@ -59,7 +57,6 @@ public class ChatServer {
 
     selector = Selector.open();
     serverChannel.register(selector, SelectionKey.OP_ACCEPT);
-    System.out.println("Listening on port " + port);
 
     while (true) {
       selector.select(); // block until at least one channel is ready
@@ -79,7 +76,6 @@ public class ChatServer {
             Connection conn = new Connection();
             SelectionKey clientKey = sc.register(selector, SelectionKey.OP_READ, conn);
             conn.key = clientKey;
-            System.out.println("Accepted connection from " + sc.getRemoteAddress());
           }
 
           if (key.isReadable()) {
@@ -93,7 +89,6 @@ public class ChatServer {
                 sc.close();
               } catch (IOException ignore) {
               }
-              System.out.println(conn.nick + " has left the chat.");
             }
           }
 
@@ -128,7 +123,6 @@ public class ChatServer {
 
           } catch (IOException ignore) {
           }
-          System.err.println("IO error: " + ioe.getMessage());
         }
       }
     }
