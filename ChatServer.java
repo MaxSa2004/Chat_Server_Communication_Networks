@@ -14,11 +14,14 @@ public class ChatServer {
   // key : nickname, value: connection (easier to find out if the nickname already
   // exists)
   private static final HashMap<String, Connection> nicknameMap = new HashMap<>();
+
   private static Selector selector;
   // ERROR msg
   private static final String ERROR = "ERROR\n";
   // OK msg
   private static final String OK = "OK\n";
+  // Bye msg
+  private static final String BYE = "BYE\n";
 
   enum State {
     INIT, INSIDE, OUTSIDE
@@ -32,6 +35,8 @@ public class ChatServer {
     String nick = null; // pseudonym (first line sent by client)
     String room = null; // room name
     State state = State.INIT; // state of connection: init, outside, inside
+    boolean closeAfterWrite = false;
+    SelectionKey key; // storing own key
   }
 
   public static void main(String[] args) throws Exception {
@@ -72,7 +77,8 @@ public class ChatServer {
               continue;
             sc.configureBlocking(false);
             Connection conn = new Connection();
-            sc.register(selector, SelectionKey.OP_READ, conn);
+            SelectionKey clientKey = sc.register(selector, SelectionKey.OP_READ, conn);
+            conn.key = clientKey;
             System.out.println("Accepted connection from " + sc.getRemoteAddress());
           }
 
@@ -101,9 +107,24 @@ public class ChatServer {
         } catch (IOException ioe) {
           // error on this channel; cancel and close
           try {
-            key.cancel();
-            if (key.channel() != null)
-              key.channel().close();
+            SelectableChannel ch = key.channel();
+            Connection conn = (Connection) key.attachment();
+            if (ch instanceof SocketChannel sc && conn != null) {
+              if (conn.state == State.INSIDE && conn.nick != null) {
+                String LeftMsg = "LEFT " + conn.nick + "\n";
+                broadcast(LeftMsg, conn.room, key);
+              }
+              if (conn.nick != null)
+                nicknameMap.remove(conn.nick);
+              conn.nick = null;
+              key.cancel();
+              sc.close();
+            } else {
+              key.cancel();
+              if (ch != null)
+                ch.close();
+            }
+
           } catch (IOException ignore) {
           }
           System.err.println("IO error: " + ioe.getMessage());
@@ -118,6 +139,29 @@ public class ChatServer {
     int bytesRead = sc.read(in);
     if (bytesRead == 0) {
       return true; // nothing read now
+    }
+    if (bytesRead == -1) {
+      switch (conn.state) {
+        case INSIDE -> {
+          String LeftMsg = "LEFT " + conn.nick + "\n";
+          broadcast(LeftMsg, conn.room, key);
+          nicknameMap.remove(conn.nick);
+          conn.nick = null;
+          conn.room = null;
+          return false;
+        }
+        case OUTSIDE -> {
+          nicknameMap.remove(conn.nick);
+          conn.nick = null;
+          return false;
+        }
+        default -> {
+          if (conn.nick != null)
+            nicknameMap.remove(conn.nick);
+          conn.nick = null;
+          return false;
+        }
+      }
     }
 
     // Prepare buffer to read the bytes just received
@@ -145,85 +189,174 @@ public class ChatServer {
 
       // Extract the line without the trailing newline and optional '\r'
       String line = conn.recv.substring(0, idx);
-      // check if it's empty
-      if (line.isEmpty())
-        return true;
       if (line.endsWith("\r"))
         line = line.substring(0, line.length() - 1);
 
       // Remove the processed line from the buffer
       conn.recv.delete(0, idx + 1);
+      if (line.isEmpty())
+        continue;
       // if the user is in init state and trying cmds that aren't /nick, ERROR
       // does the line start with '/'?
+
       if (line.startsWith("/")) {
         if (line.length() > 1 && line.charAt(1) == '/') {
           // it's just a message that starts with //
           String escapedMessage = line.substring(1);
           // Regular message: broadcast "nick: message"
-          String RegularMsg = "MESSAGE " + conn.nick +  " " + escapedMessage + "\n";
+          String RegularMsg = "MESSAGE " + conn.nick + " " + escapedMessage + "\n";
           System.out.println("Broadcasting: " + RegularMsg.trim());
           if (conn.state == State.INSIDE) {
             broadcast(RegularMsg, conn.room, null);
+          } else {
+            send(conn, key, ERROR);
           }
         } else {
-          String[] parts = line.split(" ");
+          String[] parts = line.split(" ", 3);
           String cmd = parts[0];
           switch (cmd) {
             case "/nick" -> {
-                // used to pick a nickname or to change a nickname (the nickname can't already
-                // be chosen by another user!)
-                // change states from init to outside if they are in initialization, if they are just changing the name and already outside or inside, the state doesn't change
+              // used to pick a nickname or to change a nickname (the nickname can't already
+              // be chosen by another user!)
+              // change states from init to outside if they are in initialization, if they are
+              // just changing the name and already outside or inside, the state doesn't
+              // change
+              if (parts.length < 2) {
+                send(conn, key, ERROR);
+                continue;
+              } else {
                 String new_nickname = parts[1];
-                // check if nickname already exists
-                if (nicknameMap.containsKey(new_nickname)) {
+                if (new_nickname != null) {
+                  // check if nickname already exists
+                  if (nicknameMap.containsKey(new_nickname)) {
                     send(conn, key, ERROR);
-                } else {
-                    if (conn.nick != null) { // if it's a nickname change instead of user creation
-                        nicknameMap.remove(conn.nick);
-                        String NewNickMsg = "NEWNICK " + conn.nick + " " + new_nickname + "\n";
+                    continue;
+                  } else {
+                    if (conn.nick == null && conn.state == State.INIT) { // if it's a nickname creation : state == INIT
+                      conn.nick = new_nickname;
+                      nicknameMap.put((new_nickname), conn);
+                      send(conn, key, OK);
+                      conn.state = State.OUTSIDE;
+
+                    } else if (conn.nick != null && conn.state != State.INIT) {
+                      nicknameMap.remove(conn.nick);
+                      String NewNickMsg = "NEWNICK " + conn.nick + " " + new_nickname + "\n";
+                      send(conn, key, OK);
+                      if (conn.state == State.INSIDE) {
                         broadcast(NewNickMsg, conn.room, key);
+                      }
+                      conn.nick = new_nickname;
+                      nicknameMap.put((new_nickname), conn);
                     }
-                    conn.nick = new_nickname;
-                    nicknameMap.put((new_nickname), conn);
-                    send(conn, key, OK);
-                } }
+                  }
+                } else {
+                  send(conn, key, ERROR);
+                  continue;
+                }
+              }
+
+            }
             case "/join" -> {
-                // if the user is already in a room: LEFT , then JOINED, change state to inside if they weren't before
-                String JoinedMsg = "JOINED " + conn.nick + "\n";
-                if (conn.state == State.INSIDE) {
-                    broadcast(JoinedMsg, conn.room, key); // update new room!
-                } }
+              // if the user is already in a room: LEFT , then JOINED, change state to inside
+              // if they weren't before
+              String JoinedMsg = "JOINED " + conn.nick + "\n";
+              String LeftMsg = "LEFT " + conn.nick + "\n";
+              if (parts.length < 2) {
+                send(conn, key, ERROR);
+                continue;
+
+              }
+              String new_room = parts[1];
+              if (null != conn.state)
+                switch (conn.state) {
+                  case OUTSIDE -> {
+                    conn.state = State.INSIDE;
+                    send(conn, key, OK);
+                    broadcast(JoinedMsg, new_room, key);
+                    conn.room = new_room;
+
+                  }
+                  case INIT -> send(conn, key, ERROR);
+                  case INSIDE -> {
+                    send(conn, key, OK);
+                    broadcast(LeftMsg, conn.room, key); // update new room!
+                    broadcast(JoinedMsg, new_room, key);
+                    conn.room = new_room;
+                  }
+                  default -> {
+                    send(conn, key, ERROR);
+                    continue;
+                  }
+                }
+            }
             case "/priv" -> {
               // /priv name msg
+
+              if (parts.length < 3 || conn.state == State.INIT || conn.nick == null) {
+                send(conn, key, ERROR);
+                continue;
               }
+              String target = parts[1];
+              String msg = parts[2];
+              Connection targetConn = nicknameMap.get(target);
+              if (targetConn == null) {
+                send(conn, key, ERROR);
+                continue;
+              }
+              SelectionKey targetKey = targetConn.key;
+              if (targetKey == null || !targetKey.isValid()) {
+                send(conn, key, ERROR);
+                continue;
+              }
+              String priv = "PRIVATE " + conn.nick + " " + msg + "\n";
+              send(targetConn, targetKey, priv);
+              send(conn, key, OK);
+            }
             case "/leave" -> {
-                // change room to null
-                // change state to outside
-                String LeftMsg = "LEFT " + conn.nick + "\n";
-                if (conn.state == State.INSIDE) {
-                    broadcast(LeftMsg, conn.room, key);
-                }
+              // change room to null
+              // change state to outside
+              String LeftMsg = "LEFT " + conn.nick + "\n";
+              if (conn.state == State.INSIDE) {
+                broadcast(LeftMsg, conn.room, key);
+                conn.state = State.OUTSIDE;
+                conn.room = null;
                 send(conn, key, OK);
-                }
+              } else {
+                send(conn, key, ERROR);
+                continue;
+              }
+            }
             case "/bye" -> {
-                String ByeMsg = "BYE\n";
-                    String LeftMsg = "LEFT " + conn.nick + "\n";
-                    if (conn.state == State.INSIDE) {
-                        broadcast(LeftMsg, conn.room, key);
-                    }     send(conn, key, ByeMsg);
-                    // close connection
-                }
+              String LeftMsg = "LEFT " + conn.nick + "\n";
+              if (conn.state == State.INSIDE) {
+                broadcast(LeftMsg, conn.room, key);
+                // leave room
+                conn.room = null;
+              }
+              nicknameMap.remove(conn.nick);
+              conn.nick = null;
+              send(conn, key, BYE);
+              // close connection
+              conn.closeAfterWrite = true;
+              key.interestOps((key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ);
+
+            }
             default -> {
-                }
+              // erro!
+              send(conn, key, ERROR);
+              continue;
+            }
           }
-            // erro!
-                    }
+
+        }
       } else {
         // Regular message: broadcast "nick: message"
         String RegularMsg = "MESSAGE " + conn.nick + " " + line + "\n";
         System.out.println("Broadcasting: " + RegularMsg.trim());
         if (conn.state == State.INSIDE) {
           broadcast(RegularMsg, conn.room, null);
+        } else {
+          send(conn, key, ERROR);
         }
       }
 
@@ -242,7 +375,8 @@ public class ChatServer {
     if (!message.endsWith("\n"))
       message += "\n";
     byte[] payload = message.getBytes(StandardCharsets.UTF_8);
-    // if originKey is null, the loop runs normally using the global selector and k == originKey is false, so it sends it to everyone
+    // if originKey is null, the loop runs normally using the global selector and k
+    // == originKey is false, so it sends it to everyone
     // if it exists, it works the same but k == originKey is true so it skips k
 
     for (SelectionKey k : selector.keys()) {
@@ -278,12 +412,28 @@ public class ChatServer {
         q.poll();
       }
     }
+    if (conn.closeAfterWrite) {
+      try {
+        key.cancel();
+      } catch (Exception ignore) {
+      }
+      try {
+        sc.close();
+      } catch (IOException ignore) {
+      }
+      conn.key = null;
+      return;
+
+    }
     // Nothing left to write: remove write interest
     if ((key.interestOps() & SelectionKey.OP_WRITE) != 0) {
       key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
     }
+
   }
-  // function to Unicast (send a msg to a unique client) -> to send OK and ERROR regarding the client requests to the server
+
+  // function to Unicast (send a msg to a unique client) -> to send OK and ERROR
+  // regarding the client requests to the server
   private static void send(Connection conn, SelectionKey key, String message) {
     if (!message.endsWith("\n"))
       message += "\n"; // just in case
