@@ -15,6 +15,13 @@ public class ChatClient {
 
     // Se for necessário adicionar variáveis ao objecto ChatClient, devem
     // ser colocadas aqui
+    private Socket socket;
+    private BufferedReader input; // buffered reader used to readline as chat server is line based
+    private PrintWriter output; // PrintWriter used as it supports println.
+    private Thread listenThread;
+    private boolean active;
+    private String server;
+    private int port;
 
     // Método a usar para acrescentar uma string à caixa de texto
     // * NÃO MODIFICAR *
@@ -57,20 +64,97 @@ public class ChatClient {
 
         // Se for necessário adicionar código de inicialização ao
         // construtor, deve ser colocado aqui
-
+        this.active = true;
+        this.server = server;
+        this.port = port;
     }
 
     // Método invocado sempre que o utilizador insere uma mensagem
     // na caixa de entrada
     public void newMessage(String message) throws IOException {
         // PREENCHER AQUI com código que envia a mensagem ao servidor
+        // handle empty enters
+        if (message == null || message.isEmpty()) {
+            return;
+        }
 
+        // escape rule check.. if command or not (if not command but starts with / send
+        // it with an extra / to be processed as text)
+        boolean isCmd = message.startsWith("/nick") || message.startsWith("/join")
+                || message.startsWith("/leave") || message.startsWith("/bye") || message.startsWith("/priv");
+
+        if (message.charAt(0) == '/' && !isCmd) {
+            message = "/" + message;
+        }
+
+        output.println(message); // send message to server
+        output.flush(); // pushes buffer into sockets output stream
+    }
+
+    private void processServerMessagesPrettyPrint(String line) {
+        if (line == null) {
+            return;
+        }
+
+        String[] part = line.split(" ", 3);
+        String action = part[0];
+
+        switch (action) {
+            case "MESSAGE":
+                printMessage(part[1] + ": " + part[2] + "\n");
+                break;
+            case "PRIVATE":
+                printMessage(part[1] + " (mensagem privada): " + part[2] + "\n");
+                break;
+            case "NEWNICK":
+                printMessage(part[1] + " mudou de nome para " + part[2] + "\n");
+                break;
+            case "JOINED":
+                printMessage(part[1] + " entrou na sala\n");
+                break;
+            case "LEFT":
+                printMessage(part[1] + " saiu da sala\n");
+                break;
+            case "BYE":
+                // remove socket as user has left
+                active = false;
+                try {
+                    socket.close();
+                } catch (Exception ignore) {
+                }
+            default:
+                printMessage(line + "\n");
+                break;
+        }
     }
 
     // Método principal do objecto
     public void run() throws IOException {
         // PREENCHER AQUI
+        // connect socket to server
+        socket = new Socket(server, port);
+        input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()), true); // true is auto flush
 
+        // creating reader thread
+        listenThread = new Thread(() -> {
+            try {
+                String line;
+                while (active && (line = input.readLine()) != null) {
+                    processServerMessagesPrettyPrint(line);
+                }
+            } catch (IOException e) {
+                // connection closed in case of IOExceptions
+            } finally {
+                active = false;
+                try {
+                    socket.close();
+                } catch (Exception ignore) {
+                }
+            }
+        });
+
+        listenThread.start();
     }
 
     // Instancia o ChatClient e arranca-o invocando o seu método run()
