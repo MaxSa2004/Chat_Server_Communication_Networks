@@ -104,17 +104,21 @@ public class ChatServer {
           try {
             SelectableChannel ch = key.channel();
             Connection conn = (Connection) key.attachment();
-            if (ch instanceof SocketChannel sc && conn != null) {
-              if (conn.state == State.INSIDE && conn.nick != null) {
-                String LeftMsg = "LEFT " + conn.nick + "\n";
-                broadcast(LeftMsg, conn.room, key);
+            if (ch instanceof SocketChannel) {
+              SocketChannel sc = (SocketChannel) ch;
+              if (conn != null) {
+                if (conn.state == State.INSIDE && conn.nick != null) {
+                  String LeftMsg = "LEFT " + conn.nick + "\n";
+                  broadcast(LeftMsg, conn.room, key);
+                }
+                if (conn.nick != null) {
+                  nicknameMap.remove(conn.nick);
+                }
+                conn.nick = null;
+                conn.room = null;
+                key.cancel();
+                sc.close();
               }
-              if (conn.nick != null)
-                {nicknameMap.remove(conn.nick);}
-              conn.nick = null;
-              conn.room = null;
-              key.cancel();
-              sc.close();
             } else {
               key.cancel();
               if (ch != null)
@@ -137,7 +141,7 @@ public class ChatServer {
     }
     if (bytesRead == -1) {
       switch (conn.state) {
-        case INSIDE -> {
+        case INSIDE: {
           String LeftMsg = "LEFT " + conn.nick + "\n";
           broadcast(LeftMsg, conn.room, key);
           nicknameMap.remove(conn.nick);
@@ -145,14 +149,15 @@ public class ChatServer {
           conn.room = null;
           return false;
         }
-        case OUTSIDE -> {
+        case OUTSIDE: {
           nicknameMap.remove(conn.nick);
           conn.nick = null;
           return false;
         }
-        default -> {
-          if (conn.nick != null)
-            {nicknameMap.remove(conn.nick);}
+        default: {
+          if (conn.nick != null) {
+            nicknameMap.remove(conn.nick);
+          }
           conn.nick = null;
           conn.room = null;
           return false;
@@ -211,7 +216,7 @@ public class ChatServer {
           String[] parts = line.split(" ", 3);
           String cmd = parts[0];
           switch (cmd) {
-            case "/nick" -> {
+            case "/nick": {
               // used to pick a nickname or to change a nickname (the nickname can't already
               // be chosen by another user!)
               // change states from init to outside if they are in initialization, if they are
@@ -252,7 +257,7 @@ public class ChatServer {
               }
 
             }
-            case "/join" -> {
+            case "/join": {
               // if the user is already in a room: LEFT , then JOINED, change state to inside
               // if they weren't before
               String JoinedMsg = "JOINED " + conn.nick + "\n";
@@ -265,27 +270,28 @@ public class ChatServer {
               String new_room = parts[1];
               if (null != conn.state)
                 switch (conn.state) {
-                  case OUTSIDE -> {
+                  case OUTSIDE: {
                     conn.state = State.INSIDE;
                     send(conn, key, OK);
                     broadcast(JoinedMsg, new_room, key);
                     conn.room = new_room;
 
                   }
-                  case INIT -> send(conn, key, ERROR);
-                  case INSIDE -> {
+                  case INIT:
+                    send(conn, key, ERROR);
+                  case INSIDE: {
                     send(conn, key, OK);
                     broadcast(LeftMsg, conn.room, key); // update new room!
                     broadcast(JoinedMsg, new_room, key);
                     conn.room = new_room;
                   }
-                  default -> {
+                  default: {
                     send(conn, key, ERROR);
                     continue;
                   }
                 }
             }
-            case "/priv" -> {
+            case "/priv": {
               // /priv name msg
 
               if (parts.length < 3 || conn.state == State.INIT || conn.nick == null) {
@@ -308,7 +314,7 @@ public class ChatServer {
               send(targetConn, targetKey, priv);
               send(conn, key, OK);
             }
-            case "/leave" -> {
+            case "/leave": {
               // change room to null
               // change state to outside
               String LeftMsg = "LEFT " + conn.nick + "\n";
@@ -322,7 +328,7 @@ public class ChatServer {
                 continue;
               }
             }
-            case "/bye" -> {
+            case "/bye": {
               String LeftMsg = "LEFT " + conn.nick + "\n";
               if (conn.state == State.INSIDE) {
                 broadcast(LeftMsg, conn.room, key);
@@ -337,7 +343,7 @@ public class ChatServer {
               key.interestOps((key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ);
 
             }
-            default -> {
+            default: {
               // erro!
               send(conn, key, ERROR);
               continue;
