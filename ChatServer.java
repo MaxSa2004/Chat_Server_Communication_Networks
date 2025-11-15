@@ -206,7 +206,6 @@ public class ChatServer {
           String escapedMessage = line.substring(1);
           // Regular message: broadcast "nick: message"
           String RegularMsg = "MESSAGE " + conn.nick + " " + escapedMessage + "\n";
-          System.out.println("Broadcasting: " + RegularMsg.trim());
           if (conn.state == State.INSIDE) {
             broadcast(RegularMsg, conn.room, null);
           } else {
@@ -227,17 +226,22 @@ public class ChatServer {
                 continue;
               } else {
                 String new_nickname = parts[1];
-                if (new_nickname != null) {
+                if (new_nickname != null && !new_nickname.isEmpty()) {
                   // check if nickname already exists
                   if (nicknameMap.containsKey(new_nickname)) {
                     send(conn, key, ERROR);
                     continue;
-                  } else {
+                  } else if(new_nickname.equals(conn.nick)){
+                    send(conn, key, OK); 
+                    continue;
+                  }
+                  else {
                     if (conn.nick == null && conn.state == State.INIT) { // if it's a nickname creation : state == INIT
                       conn.nick = new_nickname;
                       nicknameMap.put((new_nickname), conn);
                       send(conn, key, OK);
                       conn.state = State.OUTSIDE;
+                      continue;
 
                     } else if (conn.nick != null && conn.state != State.INIT) {
                       nicknameMap.remove(conn.nick);
@@ -248,6 +252,7 @@ public class ChatServer {
                       }
                       conn.nick = new_nickname;
                       nicknameMap.put((new_nickname), conn);
+                      continue;
                     }
                   }
                 } else {
@@ -270,26 +275,29 @@ public class ChatServer {
               String new_room = parts[1];
               if (null != conn.state)
                 switch (conn.state) {
-                  case OUTSIDE: {
+                  case OUTSIDE:
                     conn.state = State.INSIDE;
                     send(conn, key, OK);
                     broadcast(JoinedMsg, new_room, key);
                     conn.room = new_room;
+                    break;
 
-                  }
                   case INIT:
                     send(conn, key, ERROR);
-                  case INSIDE: {
+                    break;
+                  case INSIDE:
                     send(conn, key, OK);
                     broadcast(LeftMsg, conn.room, key); // update new room!
                     broadcast(JoinedMsg, new_room, key);
                     conn.room = new_room;
-                  }
-                  default: {
+                    break;
+
+                  default:
                     send(conn, key, ERROR);
-                    continue;
-                  }
+                    break;
+
                 }
+              continue;
             }
             case "/priv": {
               // /priv name msg
@@ -313,6 +321,7 @@ public class ChatServer {
               String priv = "PRIVATE " + conn.nick + " " + msg + "\n";
               send(targetConn, targetKey, priv);
               send(conn, key, OK);
+              continue;
             }
             case "/leave": {
               // change room to null
@@ -323,6 +332,7 @@ public class ChatServer {
                 conn.state = State.OUTSIDE;
                 conn.room = null;
                 send(conn, key, OK);
+                continue;
               } else {
                 send(conn, key, ERROR);
                 continue;
@@ -341,20 +351,20 @@ public class ChatServer {
               // close connection
               conn.closeAfterWrite = true;
               key.interestOps((key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ);
+              return true; // handleRead stops processing
 
             }
             default: {
               // erro!
               send(conn, key, ERROR);
-              continue;
             }
+
           }
 
         }
       } else {
         // Regular message: broadcast "nick: message"
         String RegularMsg = "MESSAGE " + conn.nick + " " + line + "\n";
-        System.out.println("Broadcasting: " + RegularMsg.trim());
         if (conn.state == State.INSIDE) {
           broadcast(RegularMsg, conn.room, null);
         } else {
@@ -362,8 +372,7 @@ public class ChatServer {
         }
       }
 
-    }
-    return true;
+    }return true;
 
   }
 
