@@ -1,6 +1,5 @@
 import java.io.*;
 import java.net.*;
-import java.util.*;
 import java.awt.*;
 import java.awt.event.*;
 import javax.swing.*;
@@ -119,9 +118,17 @@ public class ChatClient {
                 // remove socket as user has left
                 active = false;
                 try {
+                    // close socket them dispose of GUI then close app entirely (this step-by-step
+                    // close ensures safe closure of program and threads)
                     socket.close();
+                    SwingUtilities.invokeLater(() -> {
+                        frame.dispose();
+                        System.exit(0);
+                    });
+
                 } catch (Exception ignore) {
                 }
+                break;
             default:
                 printMessage(line + "\n");
                 break;
@@ -149,6 +156,10 @@ public class ChatClient {
                 active = false;
                 try {
                     socket.close();
+                    SwingUtilities.invokeLater(() -> {
+                        frame.dispose();
+                        System.exit(0);
+                    });
                 } catch (Exception ignore) {
                 }
             }
