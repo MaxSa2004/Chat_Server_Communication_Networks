@@ -118,14 +118,11 @@ public class ChatClient {
                 // remove socket as user has left
                 active = false;
                 try {
-                    // close socket them dispose of GUI then close app entirely (this step-by-step
-                    // close ensures safe closure of program and threads)
+                    // close socket with server and then deactivate input to indicate closed
+                    // connection
                     socket.close();
-                    SwingUtilities.invokeLater(() -> {
-                        frame.dispose();
-                        System.exit(0);
-                    });
-
+                    chatBox.setEditable(false);
+                    printMessage("**Conexão com o servidor encerrada com sucesso**");
                 } catch (Exception ignore) {
                 }
                 break;
@@ -153,14 +150,16 @@ public class ChatClient {
             } catch (IOException e) {
                 // connection closed in case of IOExceptions
             } finally {
-                active = false;
-                try {
-                    socket.close();
-                    SwingUtilities.invokeLater(() -> {
-                        frame.dispose();
-                        System.exit(0);
-                    });
-                } catch (Exception ignore) {
+                // "failsafe" in case server gets closed by something other than the "BYE"
+                // message from server
+                if (active) {
+                    active = false;
+                    try {
+                        socket.close();
+                        chatBox.setEditable(false);
+                        printMessage("**Conexão com o servidor encerrada com sucesso**");
+                    } catch (Exception ignore) {
+                    }
                 }
             }
         });
