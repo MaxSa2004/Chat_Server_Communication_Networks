@@ -231,11 +231,10 @@ public class ChatServer {
                   if (nicknameMap.containsKey(new_nickname)) {
                     send(conn, key, ERROR);
                     continue;
-                  } else if(new_nickname.equals(conn.nick)){
-                    send(conn, key, OK); 
+                  } else if (new_nickname.equals(conn.nick)) {
+                    send(conn, key, OK);
                     continue;
-                  }
-                  else {
+                  } else {
                     if (conn.nick == null && conn.state == State.INIT) { // if it's a nickname creation : state == INIT
                       conn.nick = new_nickname;
                       nicknameMap.put((new_nickname), conn);
@@ -372,7 +371,8 @@ public class ChatServer {
         }
       }
 
-    }return true;
+    }
+    return true;
 
   }
 
