@@ -90,12 +90,13 @@ public class ChatClient {
         output.flush(); // pushes buffer into sockets output stream
     }
 
+    // function to format and display messages to chat area in a user-friendly way
     private void processServerMessagesPrettyPrint(String line) {
         if (line == null) {
             return;
         }
 
-        String[] part = line.split(" ", 3);
+        String[] part = line.split(" ", 3); // at most 3 arguments separated by spaces
         String action = part[0];
 
         switch (action) {
@@ -137,7 +138,9 @@ public class ChatClient {
         // PREENCHER AQUI
         // connect socket to server
         socket = new Socket(server, port);
+        // receiving stream
         input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        // sending stream
         output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()), true); // true is auto flush
 
         // creating reader thread
