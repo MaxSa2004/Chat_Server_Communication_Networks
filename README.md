@@ -8,14 +8,14 @@ This repository consists of a chat server, made in Java, and communication betwe
 ## Directory Tree
 ```
 |---ChatServer.java
-|---CharClient.java
+|---ChatClient.java
 |---classes...
 |---README.md
 ```
 
 ## Run
 To run the chat server, use this command on the terminal line: `java ChatServer 8000`.
-To add clients... not yet done.
+To run each client, use the following command on the terminal line: `java ChatClient localhost 8000`.
 
 ## Client commands
 The client must communicate with the server to make certain configurations, such as:
@@ -36,3 +36,28 @@ The server responds to the client commands, and those messages might go to the c
 - LEFT {name} : Broadcasted when a user leaves a room, to the other users inside that room, except the actual user;
 - BYE : Sent to the user, to confirm that he wants to leave the server.
 
+## Example prints
+The example above shows a conversation between user rita and user atir.
+![screenshotRita](rita.png)
+Here's the flow of this side of the chat:
+- /nick rita -> OK
+- /join sala1 -> OK
+- ola -> rita: ola
+- adeus -> rita: adeus
+- /leave -> OK
+- /priv rita ola -> OK
+- /bye -> **Conexão com o servidor encerrada com sucesso**
+![screenshotAtir](atir.png)
+Here's the flow of this side of the chat:
+- /nick atir -> OK
+- /join sala1 -> OK
+- ola -> atir: ola
+- /leave -> OK
+- /priv atir ola -> OK
+- /bye -> **Conexão com o servidor encerrada com sucesso**
+
+
+## Authorship
+Made by Maximiliano Sá and Rita Moreira.
+
+Built as part of coursework at [Faculdade de Ciências da Universidade do Porto](https://www.up.pt/fcup/pt/).
